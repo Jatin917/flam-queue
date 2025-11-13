@@ -13,22 +13,30 @@ class Storage:
         self._client = redisClient.get_client()
         pass
 
+    def saveState(self, job):
+        self._client.hset(self.getKey(job.id), mapping=job.__dict__)
+
     def getKey(self, job_id):
         return f"{self.ns}:job:{job_id}"
     
     def getData(self, job_id):
         key = self.getKey(job_id)
         return self._client.hgetall(key)
+
+    def incrementAttempts(self, job):
+        job.attempts+=1
+        job.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     
     def changeState(self, state, payload):
         payload.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         payload.state = state
-        self._client.hset(self.getKey(payload.id), mapping=payload.__dict__)
+        self.saveState(payload)
 
     # Entry into the redis queue
     def enqueue(self, job: Job):
-        key = self.getKey(job.id)
-        self._client.hset(key, mapping=job.__dict__)
+        # key = self.getKey(job.id)
+        # self._client.hset(key, mapping=job.__dict__)
+        self.saveState(job)
         self._client.rpush(f"{self.ns}:queue:pending", job.id)
 
     # process jobs
@@ -41,11 +49,27 @@ class Storage:
             return
         job = Job(**data)
         self.changeState(jobState.JobState.PROCESSING.value, job)
-        print("being processed job ", self._client.hgetall(self.getKey(job.id)))
         return job
+    
+    # mark completed
     def mark_completed(self, job: Job):
-        job.state = "completed"
-        self.r.hset(f"{self.ns}:job:{job.id}", mapping=job.__dict__)
+        job.state = jobState.JobState.COMPLETED.value
+        # self.r.hset(f"{self.ns}:job:{job.id}", mapping=job.__dict__)
+        self.saveState(job)
+    
+    # failed jobs
+    def mark_failed(self, job: Job):
+        self.incrementAttempts(job)
+        if job.attempts >= int(job.max_retries):
+            job.state = "dead"
+            self._client.rpush(f"{self.ns}:queue:dead", job.id)
+        else:
+            job.state = "delayed"
+            delay = 2 ** job.attempts
+            run_at = int(time.time() + delay)
+            self._client.zadd(f"{self.ns}:queue:delayed", {job.id: run_at})
+        # self.r.hset(f"{self.ns}:job:{job.id}", mapping=job.__dict__)
+        self.saveState(job)
 
 if __name__ == "__main__":
     print("main function")
@@ -53,3 +77,9 @@ if __name__ == "__main__":
     storage = Storage()
     storage.enqueue(job)
     storage.fetchNextJob()
+    storage.mark_completed(job)
+    storage.mark_failed(job)
+    storage.mark_failed(job)
+    print("saved job 0", job)
+    storage.mark_failed(job)
+    print("saved job", job)

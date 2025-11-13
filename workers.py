@@ -5,7 +5,7 @@ import multiprocessing
 import time
 
 
-class Worker:
+class WorkerProcess:
     def __init__(self, storage:Storage):
         self.storage = storage
         self.running = True
@@ -26,7 +26,27 @@ class Worker:
     def stop(self):
         self._running = False
 
+class WorkerManager:
+    def __init__(self, storage: Storage):
+        self.storage = storage
+        self.workers = []
+
+    def start(self, count=1):
+        for _ in range(count):
+            p = multiprocessing.Process(target=self._worker_proc)
+            p.start()
+            self.workers.append(p)
+        print(f"Started {count} worker(s)")
+
+    def _worker_proc(self):
+        WorkerProcess(self.storage).start()
+
+    def stop(self):
+        for p in self.workers:
+            p.terminate()
+        print("Workers stopped")
+
 if __name__ == "__main__":
     storage = Storage()
-    worker = Worker(storage)
+    worker = WorkerProcess(storage)
     worker.start()

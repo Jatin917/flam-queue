@@ -18,7 +18,7 @@ class SchedulerQueue:
 
     def _run(self):
         while self._running:
-            self.storage.move_ready_delayed_jobs()
+            self.storage.moveReadyDelayedJob()
             time.sleep(self.poll_interval)
 
     def stop(self):

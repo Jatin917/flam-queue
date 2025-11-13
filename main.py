@@ -1,6 +1,15 @@
-from click import DateTime
+# main.py
+from cli import build_cli
+from storage import Storage
+from config import Config
 
 
-if(__name__=='main'):
-    q = queueCLI()
-    print("queue cli")
+def main():
+    storage = Storage()
+    cfg = Config.load()
+    cli = build_cli(storage=storage, config=cfg)
+    cli()
+
+
+if __name__ == "__main__":
+    main()

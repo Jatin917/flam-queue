@@ -3,11 +3,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
 
+import jobState
+
 @dataclass
 class Job:
     id: str
     command: str
-    state: str = "pending"
+    state: str = jobState.JobState.PENDING.value
     attempts: int = 0
     max_retries: int = 3
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")

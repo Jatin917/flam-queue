@@ -71,6 +71,33 @@ class Storage:
         # self.r.hset(f"{self.ns}:job:{job.id}", mapping=job.__dict__)
         self.saveState(job)
 
+    # delayed jobs to pending jobs
+    def moveReadyDelayedJob(self):
+        now = int(time.time())
+        jobs_ready = self._client.zrangebyscore(f"{self.ns}:queue:delayed", 0, now)
+        for job_id in jobs_ready:
+            self._client.rpush(f"{self.ns}:queue:pending", job_id)
+            self._client.zrem(f"{self.ns}:queue:delayed", job_id)
+            self.changeState(jobState.JobState.PENDING.value, job)
+    
+    def getSummary(self):
+        keys = self._client.keys(f"{self.ns}:job:*")
+        summary = {}
+        for k in keys:
+            state = self._client.hget(k, "state")
+            summary[state] = summary.get(state, 0) + 1
+        return summary
+
+    def listJobs(self, state=None):
+        keys = self._client.keys(f"{self.ns}:job:*")
+        jobs = []
+        for k in keys:
+            j = self._client.hgetall(k)
+            if state and j.get("state") != state:
+                continue
+            jobs.append(j)
+        return jobs
+
 if __name__ == "__main__":
     print("main function")
     job = Job.new("echo hi")
@@ -83,3 +110,5 @@ if __name__ == "__main__":
     print("saved job 0", job)
     storage.mark_failed(job)
     print("saved job", job)
+    print("summary is ",  storage.getSummary())
+    print("list is ",  storage.listJobs())

@@ -6,6 +6,10 @@ It provides a simple CLI workflow while supporting advanced background job proce
 
 ---
 
+## 🎥 Demo Video
+
+### Watch the full demo here: https://drive.google.com/file/d/1ORvP9HD_Ecf69kGODVBHc0HUh2AYftwm/view?usp=drivesdk
+
 ## 📦 Features
 
 ### ✔ Background Jobs

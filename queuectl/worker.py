@@ -21,38 +21,83 @@ class WorkerProcess:
         try:
             while True:
                 # Check Redis for stop signal
-                if self.storage.check_stop_signal(self.worker_id):
-                    print(f"[Worker {self.worker_id}] Stop signal received")
-                    break
+                try:
+                    if self.storage.check_stop_signal(self.worker_id):
+                        print(f"[Worker {self.worker_id}] Stop signal received")
+                        break
+                except Exception as e:
+                    print(f"[Worker {self.worker_id}] Error checking stop signal: {e}")
+                    # Continue anyway - don't let Redis errors stop the worker
                 
-                job = self.storage.fetchNextJob()
+                # Fetch next job
+                try:
+                    job = self.storage.fetchNextJob()
+                except Exception as e:
+                    print(f"[Worker {self.worker_id}] Error fetching next job: {e}")
+                    time.sleep(0.5)
+                    continue
+                
                 if not job:
                     time.sleep(0.5)
                     continue
                 
-                print(f"[Worker {self.worker_id}] Processing job {job.id}")
-                # Redirect stdout, stderr, and stdin to prevent Windows PRN device errors
+                # Wrap entire job processing in try-except to ensure worker continues even on errors
                 try:
-                    result = subprocess.run(
-                        job.command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        stdin=subprocess.DEVNULL,
-                        text=True,
-                        timeout=None
-                    )
-                    if result.returncode == 0:
-                        self.storage.mark_completed(job)
-                        if result.stdout:
-                            print(f"[Worker {self.worker_id}] Job {job.id} output: {result.stdout}")
-                    else:
-                        self.storage.mark_failed(job)
-                        if result.stderr:
-                            print(f"[Worker {self.worker_id}] Job {job.id} error: {result.stderr}")
+                    print(f"[Worker {self.worker_id}] Processing job {job.id}: {job.command}")
+                    
+                    # Execute the command
+                    try:
+                        result = subprocess.run(
+                            job.command,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL,
+                            text=True,
+                            timeout=None
+                        )
+                        
+                        # Handle command result
+                        if result.returncode == 0:
+                            # Command succeeded
+                            try:
+                                self.storage.mark_completed(job)
+                                print(f"[Worker {self.worker_id}] Job {job.id} completed successfully")
+                                if result.stdout:
+                                    print(f"[Worker {self.worker_id}] Job {job.id} output: {result.stdout}")
+                            except Exception as e:
+                                print(f"[Worker {self.worker_id}] Error marking job {job.id} as completed: {e}")
+                        else:
+                            # Command failed (non-zero return code)
+                            try:
+                                self.storage.mark_failed(job)
+                                print(f"[Worker {self.worker_id}] Job {job.id} failed with return code {result.returncode}")
+                                if result.stderr:
+                                    print(f"[Worker {self.worker_id}] Job {job.id} stderr: {result.stderr}")
+                                if result.stdout:
+                                    print(f"[Worker {self.worker_id}] Job {job.id} stdout: {result.stdout}")
+                            except Exception as e:
+                                print(f"[Worker {self.worker_id}] Error marking job {job.id} as failed: {e}")
+                                
+                    except subprocess.TimeoutExpired:
+                        # Command timed out (if timeout was set)
+                        try:
+                            self.storage.mark_failed(job)
+                            print(f"[Worker {self.worker_id}] Job {job.id} timed out")
+                        except Exception as e:
+                            print(f"[Worker {self.worker_id}] Error handling timeout for job {job.id}: {e}")
+                    except Exception as e:
+                        # Error executing command (e.g., command not found, permission denied, etc.)
+                        try:
+                            self.storage.mark_failed(job)
+                            print(f"[Worker {self.worker_id}] Error executing job {job.id}: {type(e).__name__}: {e}")
+                        except Exception as storage_error:
+                            print(f"[Worker {self.worker_id}] Error marking job {job.id} as failed: {storage_error}")
+                            
                 except Exception as e:
-                    print(f"[Worker {self.worker_id}] Error executing job {job.id}: {e}")
-                    self.storage.mark_failed(job)
+                    # Catch-all for any unexpected errors in job processing
+                    print(f"[Worker {self.worker_id}] Unexpected error processing job {job.id if 'job' in locals() else 'unknown'}: {type(e).__name__}: {e}")
+                    # Continue to next iteration - don't let one bad job stop the worker
         finally:
             # Unregister and cleanup
             self.storage.unregister_worker(self.worker_id)

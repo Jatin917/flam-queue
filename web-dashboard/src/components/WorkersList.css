@@ -1,0 +1,76 @@
+.workers-list {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.workers-list h3 {
+  font-size: 1.2rem;
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.workers-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.worker-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 1rem;
+  transition: border-color 0.2s;
+}
+
+.worker-card:hover {
+  border-color: #667eea;
+}
+
+.worker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.worker-id {
+  font-weight: 600;
+  color: #333;
+  font-size: 1rem;
+}
+
+.worker-status {
+  font-size: 0.85rem;
+  color: #4caf50;
+}
+
+.worker-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.worker-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.detail-label {
+  color: #666;
+}
+
+.detail-value {
+  color: #333;
+  font-weight: 500;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: #999;
+  font-style: italic;
+}
+

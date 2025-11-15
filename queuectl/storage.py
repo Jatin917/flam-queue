@@ -42,15 +42,30 @@ class Storage:
 
     # process jobs
     def fetchNextJob(self):
+        """
+        Atomically fetch the next job from the pending queue.
+        Uses Redis LPOP which is atomic - only one worker can pop a job at a time.
+        This prevents race conditions where multiple workers pick the same job.
+        """
         job_id = self._client.lpop(f"{self.ns}:queue:pending")
         if not job_id:
             return None
-        data = self.getData(job_id)
-        if not data:
-            return
-        job = Job(**data)
-        self.changeState(jobState.JobState.PROCESSING.value, job)
-        return job
+        
+        if isinstance(job_id, bytes):
+            job_id = job_id.decode('utf-8')
+        
+        try:
+            data = self.getData(job_id)
+            if not data:
+                print(f"[WARNING] Job {job_id} was in queue but data not found - job may have been deleted")
+                return None
+            
+            job = Job(**data)
+            self.changeState(jobState.JobState.PROCESSING.value, job)
+            return job
+        except Exception as e:
+            print(f"[ERROR] Error processing job {job_id} after pop: {e}")
+            return None
     
     # mark completed
     def mark_completed(self, job: Job):
@@ -74,12 +89,73 @@ class Storage:
 
     # delayed jobs to pending jobs
     def moveReadyDelayedJob(self):
+        """
+        Atomically move ready delayed jobs to pending queue.
+        Uses Redis ZREMRANGEBYSCORE with ZRANGE to prevent race conditions
+        where multiple schedulers move the same jobs.
+        """
         now = int(time.time())
-        jobs_ready = self._client.zrangebyscore(f"{self.ns}:queue:delayed", 0, now)
-        for job_id in jobs_ready:
-            self._client.rpush(f"{self.ns}:queue:pending", job_id)
-            self._client.zrem(f"{self.ns}:queue:delayed", job_id)
-            self.changeState(jobState.JobState.PENDING.value, job)
+        delayed_key = f"{self.ns}:queue:delayed"
+        pending_key = f"{self.ns}:queue:pending"
+        
+        lua_script = """
+        local delayed_key = KEYS[1]
+        local pending_key = KEYS[2]
+        local now = tonumber(ARGV[1])
+        
+        -- Get all jobs ready to run (score <= now)
+        local jobs = redis.call('ZRANGEBYSCORE', delayed_key, 0, now)
+        
+        if #jobs == 0 then
+            return {}
+        end
+        
+        -- Remove jobs from delayed queue and add to pending queue atomically
+        local moved = {}
+        for i, job_id in ipairs(jobs) do
+            -- Remove from delayed (returns 1 if removed, 0 if not found)
+            local removed = redis.call('ZREM', delayed_key, job_id)
+            if removed == 1 then
+                -- Only add to pending if we successfully removed from delayed
+                redis.call('RPUSH', pending_key, job_id)
+                table.insert(moved, job_id)
+            end
+        end
+        
+        return moved
+        """
+        
+        try:
+            # Execute Lua script atomically
+            moved_job_ids = self._client.eval(lua_script, 2, delayed_key, pending_key, str(now))
+            
+            # Update state for moved jobs
+            if moved_job_ids:
+                for job_id in moved_job_ids:
+                    if isinstance(job_id, bytes):
+                        job_id = job_id.decode('utf-8')
+                    
+                    try:
+                        data = self.getData(job_id)
+                        if data:
+                            job = Job(**data)
+                            self.changeState(jobState.JobState.PENDING.value, job)
+                    except Exception as e:
+                        print(f"[ERROR] Error updating state for moved job {job_id}: {e}")
+        except Exception as e:
+            print(f"[WARNING] Lua script failed, using fallback method: {e}")
+            jobs_ready = self._client.zrangebyscore(delayed_key, 0, now)
+            for job_id in jobs_ready:
+                try:
+                    removed = self._client.zrem(delayed_key, job_id)
+                    if removed:
+                        self._client.rpush(pending_key, job_id)
+                        data = self.getData(job_id)
+                        if data:
+                            job = Job(**data)
+                            self.changeState(jobState.JobState.PENDING.value, job)
+                except Exception as e:
+                    print(f"[ERROR] Error moving job {job_id}: {e}")
     
     def getSummary(self):
         keys = self._client.keys(f"{self.ns}:job:*")

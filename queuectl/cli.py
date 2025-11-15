@@ -19,7 +19,15 @@ def build_cli(storage, config):
         # ========== ENQUEUE ==========
         enq = sub.add_parser("enqueue", help="Add a job to the queue")
         enq.add_argument("--command", "-c", required=True, help="The command to execute")
-        enq.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts")
+        # Get default max_retries from config
+        default_max_retries = config.get("max_retries")
+        if isinstance(default_max_retries, str):
+            default_max_retries = int(default_max_retries)
+        elif default_max_retries is None:
+            default_max_retries = 3
+        else:
+            default_max_retries = int(default_max_retries)
+        enq.add_argument("--max-retries", type=int, default=default_max_retries, help="Maximum retry attempts")
 
 
         # ========== WORKER ==========
@@ -43,7 +51,10 @@ def build_cli(storage, config):
 
         # ========== CONFIG ==========
         cfg = sub.add_parser("config", help="Update config file")
-        cfg.add_argument("set", nargs=2, help="Set config key and value")
+        cfg_sub = cfg.add_subparsers(dest="config_action", required=True)
+        cfg_set = cfg_sub.add_parser("set", help="Set config key and value")
+        cfg_set.add_argument("key", help="Config key to set")
+        cfg_set.add_argument("value", help="Config value to set")
 
         args = parser.parse_args()
 
@@ -136,7 +147,7 @@ def build_cli(storage, config):
                 d = DLQ(storage=storage)
 
                 if args.action == "list":
-                    print("[DLQ] Dead Letter Queue:", d.listJobs())
+                    print("[DLQ] Dead Letter Queue:", d.list())
 
                 elif args.action == "retry":
                     if not args.job_id:
@@ -148,10 +159,12 @@ def build_cli(storage, config):
             # -----------------------
 
             elif args.cmd == "config":
-                k, v = args.set
-                config.set(k, v)
-                config.save()
-                print(f"[CONFIG] Updated config {k}={v}")
+                if args.config_action == "set":
+                    k = args.key
+                    v = args.value
+                    config.set(k, v)
+                    config.save()
+                    print(f"[CONFIG] Updated config {k}={v}")
 
         except Exception as e:
             print("[ERROR] Unexpected error:", e)

@@ -4,5 +4,6 @@ class JobState(Enum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
-    DONE = "DONE"
+    DELAYED = "DELAYED"
     FAILED = "FAILED"
+    DEAD = "DEAD"

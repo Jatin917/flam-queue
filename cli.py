@@ -1,75 +1,141 @@
 import argparse
 import json
-from workers import WorkerManager
+from models import Job
+from worker import WorkerManager
 from scheduler import SchedulerQueue
 from dlq import DLQ
 
 def build_cli(storage, config):
+
     def cli_entry():
-        parser = argparse.ArgumentParser(prog="queuectl")
-        sub = parser.add_subparsers(dest="cmd")
+
+        parser = argparse.ArgumentParser(
+            prog="queuectl",
+            description="QueueCTL - Simple Redis based job queue manager"
+        )
+
+        sub = parser.add_subparsers(dest="cmd", required=True)
+
+        # ========== ENQUEUE ==========
+        enq = sub.add_parser("enqueue", help="Add a job to the queue")
+        enq.add_argument("--command", "-c", required=True, help="The command to execute")
+        enq.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts")
 
 
-        # enqueue
-        enq = sub.add_parser("enqueue")
-        enq.add_argument("job_json")
+        # ========== WORKER ==========
+        wk = sub.add_parser("worker", help="Start or stop workers")
+        wk.add_argument("action", choices=["start", "stop"], help="Action to perform")
+        wk.add_argument("--count", type=int, default=1, help="Number of worker processes")
 
+        # ========== STATUS ==========
+        st = sub.add_parser("status", help="Show queue summary")
 
-        # worker
-        wk = sub.add_parser("worker")
-        wk.add_argument("action", choices=["start", "stop"])
-        wk.add_argument("--count", type=int, default=1)
+        # ========== LIST ==========
+        lst = sub.add_parser("list", help="List jobs in queue")
+        lst.add_argument("--state", help="Filter jobs by state (pending, processing, dead, delayed)")
 
+        # ========== DLQ ==========
+        dlq = sub.add_parser("dlq", help="Dead Letter Queue operations")
+        dlq.add_argument("action", choices=["list", "retry"], help="List DLQ or retry a job")
+        dlq.add_argument("job_id", nargs="?", help="Job ID required when retrying a job")
 
-        # status
-        sub.add_parser("status")
-
-
-        # list
-        lst = sub.add_parser("list")
-        lst.add_argument("--state", default=None)
-
-
-        # dlq
-        dlq = sub.add_parser("dlq")
-        dlq.add_argument("action", choices=["list", "retry"])
-        dlq.add_argument("job_id", nargs="?")
-
-
-        # config
-        cfg = sub.add_parser("config")
-        cfg.add_argument("set", nargs=2)
-
+        # ========== CONFIG ==========
+        cfg = sub.add_parser("config", help="Update config file")
+        cfg.add_argument("set", nargs=2, help="Set config key and value")
 
         args = parser.parse_args()
-        # basic dispatcher (skeleton)
-        if args.cmd == "enqueue":
-            job = json.loads(args.job_json)
-            storage.enqueue(job)
-            print("enqueued", job.get("id"))
-        elif args.cmd == "worker":
-            manager = WorkerManager(storage=storage, config=config)
-            if args.action == "start":
-                manager.start(count=args.count)
-            else:
-                manager.stop()
-        elif args.cmd == "status":
-            print(storage.getSummary())
-        elif args.cmd == "list":
-            print(storage.listJobs(state=args.state))
-        elif args.cmd == "dlq":
-            d = DLQ(storage=storage)
-            if args.action == "list":
-                print(d.listJobs())
-            elif args.action == "retry" and args.job_id:
-                d.retry(args.job_id)
-        elif args.cmd == "config":
-            k, v = args.set
-            config.set(k, v)
-            config.save()
-            print("config updated")
-        else:
-            parser.print_help()
+        print("... args is", args)
 
+        # =============================================================
+        # COMMAND HANDLER
+        # =============================================================
+        try:
+            if args.cmd == "enqueue":
+            # STEP 1 — JSON Validation
+                try:
+                    job = {
+                    "command": args.command,
+                    "max_retries": args.max_retries
+                    }
+                    # Enqueue it
+                except json.JSONDecodeError:
+                    print("[ERROR] Invalid JSON. Use: '{\"command\": \"echo hi\"}'")
+                    return
+
+                # STEP 2 — Must be a dict
+                if not isinstance(job, dict):
+                    print("[ERROR] Job must be a JSON object like: {\"command\": \"echo hi\"}")
+                    return
+
+                # STEP 3 — Must contain 'command'
+                if "command" not in job:
+                    print("[ERROR] Missing required field: 'command'")
+                    print("   Example: python main.py enqueue '{\"command\": \"echo hi\"}'")
+                    return
+
+                # STEP 4 — Command must be string and not empty
+                if not isinstance(job["command"], str) or not job["command"].strip():
+                    print("[ERROR] Field 'command' must be a non-empty string.")
+                    return
+
+                # Everything is OK → enqueue job
+                jobObj = Job.new(
+                    command=job["command"],
+                    max_retries=job["max_retries"]
+                )
+                storage.enqueue(jobObj)
+                print("[OK] Job enqueued successfully:", jobObj)
+
+
+            # -----------------------
+
+            elif args.cmd == "worker":
+                print("workers start ")
+                manager = WorkerManager(storage=storage)
+
+                if args.action == "start":
+                    print(f"[START] Starting {args.count} workers...")
+                    manager.start(count=args.count)
+                else:
+                    print("[STOP] Stopping workers...")
+                    manager.stop()
+
+            # -----------------------
+
+            elif args.cmd == "status":
+                summary = storage.getSummary()
+                print("[STATUS] Queue Summary:", summary)
+
+            # -----------------------
+
+            elif args.cmd == "list":
+                jobs = storage.listJobs(state=args.state)
+                print("[LIST] Jobs:", jobs)
+
+            # -----------------------
+
+            elif args.cmd == "dlq":
+                d = DLQ(storage=storage)
+
+                if args.action == "list":
+                    print("[DLQ] Dead Letter Queue:", d.listJobs())
+
+                elif args.action == "retry":
+                    if not args.job_id:
+                        print("[ERROR] Missing job_id for retry command.")
+                        return
+                    d.retry(args.job_id)
+                    print(f"[RETRY] Retried job {args.job_id}")
+
+            # -----------------------
+
+            elif args.cmd == "config":
+                k, v = args.set
+                config.set(k, v)
+                config.save()
+                print(f"[CONFIG] Updated config {k}={v}")
+
+        except Exception as e:
+            print("[ERROR] Unexpected error:", e)
 
     return cli_entry

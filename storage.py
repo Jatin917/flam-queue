@@ -13,7 +13,7 @@ class Storage:
         self._client = redisClient.get_client()
         pass
 
-    def saveState(self, job):
+    def saveState(self, job:Job):
         self._client.hset(self.getKey(job.id), mapping=job.__dict__)
 
     def getKey(self, job_id):
@@ -33,11 +33,14 @@ class Storage:
         self.saveState(payload)
 
     # Entry into the redis queue
-    def enqueue(self, job: Job):
+    def enqueue(self, jobPayload: Job):
+        # jobPayload = (Job.new(job)).__dict__
+        print("job is ", jobPayload, jobPayload.id)
         # key = self.getKey(job.id)
         # self._client.hset(key, mapping=job.__dict__)
-        self.saveState(job)
-        self._client.rpush(f"{self.ns}:queue:pending", job.id)
+        self.saveState(jobPayload)
+        print("job is ", jobPayload)
+        self._client.rpush(f"{self.ns}:queue:pending", jobPayload.id)
 
     # process jobs
     def fetchNextJob(self):

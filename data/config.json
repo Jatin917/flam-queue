@@ -1,0 +1,5 @@
+{
+  "namespace": "queuectl",
+  "redis_url": "redis://localhost:6379",
+  "max_workers": 1
+}

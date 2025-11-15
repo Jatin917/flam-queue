@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
 
-import jobState
+import queuectl.jobState as jobState
 
 @dataclass
 class Job:

@@ -1,0 +1,10 @@
+[project]
+name = "queuectl"
+version = "0.1.0"
+dependencies = ["redis"]
+
+[tool.setuptools]
+packages = ["queuectl"]  # explicitly include only queuectl folder
+
+[project.scripts]
+queuectl = "queuectl.main:main"

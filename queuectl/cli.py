@@ -1,9 +1,9 @@
 import argparse
 import json
-from models import Job
-from worker import WorkerManager
-from scheduler import SchedulerQueue
-from dlq import DLQ
+from queuectl.models import Job
+from queuectl.worker import WorkerManager
+from queuectl.scheduler import SchedulerQueue
+from queuectl.dlq import DLQ
 
 def build_cli(storage, config):
 

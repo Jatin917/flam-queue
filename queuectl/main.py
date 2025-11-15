@@ -1,7 +1,7 @@
 # main.py
-from cli import build_cli
-from storage import Storage
-from config import Config
+from queuectl.cli import build_cli
+from queuectl.storage import Storage
+from queuectl.config import Config
 
 
 def main():

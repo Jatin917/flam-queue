@@ -1,4 +1,4 @@
-from storage import Storage
+from queuectl.storage import Storage
 import subprocess
 import multiprocessing
 import time

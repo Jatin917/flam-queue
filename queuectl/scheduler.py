@@ -1,7 +1,7 @@
 # schedulerQueue.py
 import time
 import threading
-from storage import Storage
+from queuectl.storage import Storage
 
 class SchedulerQueue:
     def __init__(self, storage: Storage, poll_interval=2):

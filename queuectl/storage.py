@@ -2,9 +2,9 @@
 
 from aiohttp import Payload
 from dotenv import get_key
-import jobState
-from models import Job
-from redisConnection import RedisConnection
+import queuectl.jobState as jobState
+from queuectl.models import Job
+from queuectl.redisConnection import RedisConnection
 import time
 class Storage:
     def __init__(self, namespace="queuectl"):

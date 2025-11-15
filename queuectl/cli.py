@@ -24,8 +24,10 @@ def build_cli(storage, config):
 
         # ========== WORKER ==========
         wk = sub.add_parser("worker", help="Start or stop workers")
-        wk.add_argument("action", choices=["start", "stop"], help="Action to perform")
-        wk.add_argument("--count", type=int, default=1, help="Number of worker processes")
+        wk.add_argument("action", choices=["start", "stop", "list"], help="Action to perform")
+        wk.add_argument("--count", type=int, default=1, help="Number of worker processes (for start)")
+        wk.add_argument("--pid", type=int, help="Stop a specific worker by PID")
+        wk.add_argument("--all", action="store_true", help="Stop all workers")
 
         # ========== STATUS ==========
         st = sub.add_parser("status", help="Show queue summary")
@@ -44,7 +46,6 @@ def build_cli(storage, config):
         cfg.add_argument("set", nargs=2, help="Set config key and value")
 
         args = parser.parse_args()
-        print("... args is", args)
 
         # =============================================================
         # COMMAND HANDLER
@@ -90,15 +91,32 @@ def build_cli(storage, config):
             # -----------------------
 
             elif args.cmd == "worker":
-                print("workers start ")
                 manager = WorkerManager(storage=storage)
 
                 if args.action == "start":
                     print(f"[START] Starting {args.count} workers...")
                     manager.start(count=args.count)
-                else:
-                    print("[STOP] Stopping workers...")
-                    manager.stop()
+                elif args.action == "list":
+                    workers = manager.list_workers()
+                    if not workers:
+                        print("[LIST] No workers running")
+                    else:
+                        print(f"[LIST] {len(workers)} worker(s) running:")
+                        for worker in workers:
+                            worker_id = worker.get("worker_id", "?")
+                            pid = worker.get("pid", "?")
+                            started_at = worker.get("started_at", "?")
+                            print(f"  Worker {worker_id}: PID {pid}, Started: {started_at}")
+                else:  # stop
+                    if args.pid:
+                        print(f"[STOP] Stopping worker with PID {args.pid}...")
+                        manager.stop_by_pid(args.pid)
+                    elif args.all:
+                        print("[STOP] Stopping all workers...")
+                        manager.stop_all()
+                    else:
+                        print("[STOP] Stopping all workers...")
+                        manager.stop_all()
 
             # -----------------------
 

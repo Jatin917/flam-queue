@@ -1,0 +1,279 @@
+# 🧠 queuectl Architecture (BullMQ-Inspired)
+
+This document describes the full architecture of the **queuectl** distributed queueing system, inspired by BullMQ, Sidekiq, and Celery. It includes an overview of all components, data flow, Redis schema, and the interaction between CLI, workers, scheduler, server, and dashboard.
+
+---
+
+# ⚙️ 1. System Overview
+
+`queuectl` is a modular job queue system built with:
+
+* **Python** → workers, CLI, scheduler
+* **Redis** → storage engine + atomic queue operations
+* **FastAPI** → backend monitoring server
+* **React** → dashboard UI
+
+## Core Components
+
+1. **CLI (`queuectl`)**
+2. **Redis Storage Layer**
+3. **Workers (multi-process)**
+4. **Scheduler (delayed jobs)**
+5. **FastAPI Monitoring Server (`server/app.py`)**
+6. **React Web Dashboard (`web-dashboard/`)**
+
+All components communicate only through **Redis**, making the system horizontally scalable.
+
+---
+
+# 🔵 2. Architecture Diagram
+
+```
+       +------------------+
+       |    queuectl CLI  |
+       +------------------+
+                |
+                v
+     +---------------------------+
+     |        Redis Storage      |
+     |  - pending (LIST)         |
+     |  - delayed (ZSET)         |
+     |  - dead (LIST)            |
+     |  - job:{id} (HASH)        |
+     |  - config (HASH)          |
+     |  - workers (HASH)         |
+     +---------------------------+
+                |
+                v
+       +------------------+
+       |     Workers      |
+       |  (multiprocess)  |
+       +------------------+
+                |
+                v
+       +------------------+
+       |    Scheduler     |
+       | (delayed → pend) |
+       +------------------+
+                |
+                v
+       +------------------+
+       |  FastAPI Server  |
+       +------------------+
+                |
+                v
+       +------------------+
+       |  React Dashboard |
+       +------------------+
+```
+
+---
+
+# 🟥 3. Redis Data Model
+
+### Job Record
+
+Stored as a HASH:
+
+```
+queuectl:job:{job_id}
+```
+
+Fields:
+
+* id
+* command
+* state
+* attempts
+* max_retries
+* created_at
+* updated_at
+
+### Pending Queue (FIFO)
+
+```
+queuectl:queue:pending  (LIST)
+```
+
+Workers `LPOP` jobs from this.
+
+### Delayed Jobs
+
+```
+queuectl:queue:delayed  (ZSET)
+```
+
+Score = `run_at` timestamp.
+
+### Dead Letter Queue
+
+```
+queuectl:queue:dead  (LIST)
+```
+
+Holds permanently failed jobs.
+
+### Worker Heartbeats (optional)
+
+```
+queuectl:workers  (HASH)
+worker:{pid} → last_seen
+```
+
+### Configuration
+
+```
+queuectl:config  (HASH)
+```
+
+* max_retries
+* backoff_base
+
+---
+
+# 🟧 4. Component Responsibilities
+
+## 4.1 CLI (queuectl)
+
+Commands:
+
+* `queuectl enqueue {job_json}`
+* `queuectl worker start --count N`
+* `queuectl worker stop`
+* `queuectl list --state pending`
+* `queuectl dlq list`
+* `queuectl dlq retry <id>`
+* `queuectl config set key value`
+
+The CLI only interacts with Redis.
+
+---
+
+## 4.2 Worker System
+
+Each worker is a separate Python process.
+
+### Worker loop:
+
+1. LPOP from pending queue
+2. Load job metadata
+3. Update state = "processing"
+4. Execute command using `subprocess.run()`
+5. If success → completed
+6. If fail:
+
+   * attempts++
+   * retry or send to DLQ
+7. Update Redis states
+
+Workers are stateless, horizontally scalable.
+
+---
+
+## 4.3 Scheduler
+
+Runs continuously in a background thread.
+
+### Responsibilities:
+
+* Read delayed jobs: `ZRANGEBYSCORE(delayed, 0, now)`
+* Move ready jobs → pending queue
+* Update state: delayed → pending
+
+This mirrors **BullMQ QueueScheduler**.
+
+---
+
+# 🟩 5. FastAPI Monitoring Server
+
+File: `server/app.py`
+
+Provides APIs for the dashboard:
+
+* `/stats` → counts of pending, processing, completed, dead
+* `/jobs` → list all jobs
+* `/jobs?state=pending`
+* `/workers` → active workers, their PID & start time
+* `/dlq` → dead jobs
+* `/dlq/{id}/retry`
+
+Workers may send heartbeat signals for tracking.
+
+---
+
+# 🟦 6. Web Dashboard (React)
+
+Directory: `web-dashboard/`
+
+Provides:
+
+* Summary cards (pending, processing, completed, dead)
+* Worker list
+* Job list with filters
+* Auto-refresh
+
+UI inspired by BullMQ Pro dashboard.
+
+---
+
+# 🟣 7. Data Flow Summary
+
+## A. Enqueuing
+
+```
+CLI → Redis (push job to pending)
+```
+
+## B. Worker Processing
+
+```
+Worker → LPOP pending → execute → update state
+```
+
+## C. Retry Logic
+
+```
+failed → increment attempts → if attempts < max → ZADD delayed
+else → DLQ
+```
+
+## D. Scheduler
+
+```
+ZSET(delayed) → LIST(pending)
+```
+
+## E. Dashboard
+
+```
+React → FastAPI → Redis
+```
+
+---
+
+# 🧩 8. Future Enhancements
+
+* Priority queues
+* Concurrency limits
+* Rate limiting
+* Cron-like recurring jobs
+* Metrics & Prometheus exporter
+* WebSockets for real-time updates
+* Job logs storage
+
+---
+
+# 🏁 9. Summary
+
+The system closely follows BullMQ's architecture:
+
+* Redis LIST for pending
+* Redis ZSET for delayed
+* Redis LIST for DLQ
+* Atomic queue operations
+* Scheduler for delayed jobs
+* Multiple workers
+* Monitoring server
+* UI dashboard
+
+This modular architecture allows scaling workers, server, and dashboard independently.
